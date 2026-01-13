@@ -34,6 +34,8 @@ def render_video(
     # Assets
     background_path = os.path.join(assets_dir, "background.png") if assets_dir else ""
     font_path = os.path.join(assets_dir, "fonts", "Poppins-Medium.ttf") if assets_dir else ""
+    if font_path and not os.path.exists(font_path):
+        font_path = ""
 
     BACKGROUND_COLOR = (255, 255, 255)
 
@@ -215,21 +217,24 @@ def render_video(
         # Subtitrlarni qo'shish
         # =========================
         if captions_path and os.path.exists(captions_path) and os.getenv("SKIP_CAPTIONS") != "1":
-            subs = SubtitlesClip(
-                captions_path,
-                make_textclip=make_subtitle_txt,
-                encoding="utf-8-sig"
-            )
-
-            probe = make_subtitle_txt("gypqj\n ")
-            panel_h = probe.h
             try:
-                probe.close()
+                subs = SubtitlesClip(
+                    captions_path,
+                    make_textclip=make_subtitle_txt,
+                    encoding="utf-8-sig"
+                )
+
+                probe = make_subtitle_txt("gypqj\n ")
+                panel_h = probe.h
+                try:
+                    probe.close()
+                except Exception:
+                    pass
+
+                subs = subs.with_position(("center", TARGET_H - SUB_BOTTOM_MARGIN - panel_h))
+                final = CompositeVideoClip([final, subs], size=(TARGET_W, TARGET_H)).with_duration(final.duration)
             except Exception:
                 pass
-
-            subs = subs.with_position(("center", TARGET_H - SUB_BOTTOM_MARGIN - panel_h))
-            final = CompositeVideoClip([final, subs], size=(TARGET_W, TARGET_H)).with_duration(final.duration)
 
         # =========================
         # Saqlash
