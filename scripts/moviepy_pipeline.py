@@ -2,6 +2,8 @@
 import os
 from glob import glob
 
+from typing import Optional
+
 from moviepy import (
     ImageClip, AudioFileClip, AudioClip, CompositeVideoClip, ColorClip,
     concatenate_videoclips, concatenate_audioclips, TextClip
@@ -15,7 +17,7 @@ def render_video(
     images_dir: str,
     audio_path: str,
     output_path: str,
-    captions_path: str | None = None,
+    captions_path: Optional[str] = None,
     assets_dir: str = "",
 ):
     # =========================
