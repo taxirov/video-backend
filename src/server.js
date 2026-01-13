@@ -3,11 +3,15 @@ import multer from "multer";
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
+import { fileURLToPath } from "url";
 
 const app = express();
 app.use(express.json());
 
 const BASE_DIR = "/home/apps/avto-video";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const SCRIPTS_DIR = path.resolve(__dirname, "..", "scripts");
 const STORAGE_DIR = path.join(BASE_DIR, "storage");
 const VIDEOS_DIR = path.join(STORAGE_DIR, "videos");
 const ASSETS_DIR = path.join(BASE_DIR, "assets");
@@ -107,7 +111,7 @@ function startRender(productId) {
   try { fs.unlinkSync(p.errorPath); } catch {}
 
   const args = [
-    path.join(BASE_DIR, "scripts", "render_video.py"),
+    path.join(SCRIPTS_DIR, "render_video.py"),
     "--images-dir", p.imagesDir,
     "--audio-path", p.audioPath,
     "--output-path", p.outVideo,
