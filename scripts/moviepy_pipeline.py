@@ -24,8 +24,8 @@ def render_video(
     # =========================
     # Sozlamalar (siznikidan)
     # =========================
-    FPS = 24
-    TARGET_W, TARGET_H = 1080, 1920
+    FPS = 20
+    TARGET_W, TARGET_H = 720, 1280
 
     MODE = "trim_to_audio"  # {"trim_to_audio", "pad_audio"}
     TRANSITION = 0.6
@@ -42,7 +42,7 @@ def render_video(
     BORDER_COLOR = (240, 240, 240)
 
     # subtitles UI
-    SUB_FONT_SIZE = 56
+    SUB_FONT_SIZE = 44
     SUB_PAD_X, SUB_PAD_Y = 36, 18
     SUB_BOX_OPACITY = 0.55
     SUB_STROKE_WIDTH = 4
@@ -146,6 +146,8 @@ def render_video(
             size=(box_w, box_h)
         )
 
+    MAX_IMAGES = 30
+
     # =========================
     # Ma'lumotlarni tayyorlash
     # =========================
@@ -155,6 +157,8 @@ def render_video(
     )
     if not images:
         raise FileNotFoundError(f"'{images_dir}' papkasida rasm topilmadi.")
+    if len(images) > MAX_IMAGES:
+        images = images[:MAX_IMAGES]
 
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"Audio topilmadi: {audio_path}")
@@ -210,7 +214,7 @@ def render_video(
         # =========================
         # Subtitrlarni qo'shish
         # =========================
-        if captions_path and os.path.exists(captions_path):
+        if captions_path and os.path.exists(captions_path) and os.getenv("SKIP_CAPTIONS") != "1":
             subs = SubtitlesClip(
                 captions_path,
                 make_textclip=make_subtitle_txt,
