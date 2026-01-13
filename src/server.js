@@ -146,23 +146,43 @@ function startRender(productId) {
   const py = spawn("python3", args, { stdio: ["ignore", "ignore", "pipe"] });
 
   let stderr = "";
+  let settled = false;
+  const finishFailed = (msg) => {
+    if (settled) return;
+    settled = true;
+    fs.writeFileSync(p.errorPath, msg || "Render failed");
+    writeStatus(p, { status: "failed", finishedAt: new Date().toISOString() });
+    releaseLock(p.lockPath);
+  };
+
+  const finishDone = () => {
+    if (settled) return;
+    settled = true;
+    writeStatus(p, {
+      status: "done",
+      finishedAt: new Date().toISOString(),
+      fileUrl: publicFileUrl(p.outRel)
+    });
+    releaseLock(p.lockPath);
+  };
+
   py.stderr.on("data", (d) => { stderr += d.toString(); });
 
-  py.on("close", (code) => {
+  py.on("error", (err) => {
+    finishFailed(err?.stack || err?.message || "Renderer process error");
+  });
+
+  py.on("close", (code, signal) => {
     if (code === 0 && fs.existsSync(p.outVideo)) {
-      writeStatus(p, {
-        status: "done",
-        finishedAt: new Date().toISOString(),
-        fileUrl: publicFileUrl(p.outRel)
-      });
-      releaseLock(p.lockPath);
+      finishDone();
       return;
     }
 
-    const msg = stderr || `Render failed with exit code ${code}`;
-    fs.writeFileSync(p.errorPath, msg);
-    writeStatus(p, { status: "failed", finishedAt: new Date().toISOString() });
-    releaseLock(p.lockPath);
+    const parts = [];
+    if (stderr) parts.push(stderr.trim());
+    if (signal) parts.push(`Signal: ${signal}`);
+    if (!parts.length) parts.push(`Render failed with exit code ${code}`);
+    finishFailed(parts.join("\n"));
   });
 
   return { started: true, status: "running" };

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
+import tempfile
 from glob import glob
 
 from typing import Optional
@@ -48,6 +49,34 @@ def render_video(
     SUB_SHADOW_OFFSET = (3, 3)
     SUB_SHADOW_ALPHA = 0.35
     SUB_BOTTOM_MARGIN = 160
+
+    def downscale_images(image_paths, max_w, max_h, tmpdir):
+        try:
+            from PIL import Image
+        except Exception:
+            return image_paths
+
+        if max_w <= 0 or max_h <= 0:
+            return image_paths
+
+        resized = []
+        for idx, src in enumerate(image_paths):
+            try:
+                with Image.open(src) as im:
+                    original_size = im.size
+                    im.thumbnail((max_w, max_h), Image.LANCZOS)
+                    if im.size == original_size:
+                        resized.append(src)
+                        continue
+                    im = im.convert("RGB")
+                    dst = os.path.join(tmpdir, f"{idx:03d}.jpg")
+                    im.save(dst, format="JPEG", quality=85, optimize=True)
+                    resized.append(dst)
+                    continue
+            except Exception:
+                pass
+            resized.append(src)
+        return resized
 
     # =========================
     # Yordamchi funksiyalar
@@ -130,76 +159,82 @@ def render_video(
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"Audio topilmadi: {audio_path}")
 
-    audio = AudioFileClip(audio_path)
-    audio_duration = float(audio.duration)
+    inner_w = int(TARGET_W * CONTENT_SCALE) - 2 * BORDER_PX
+    inner_h = int(TARGET_H * CONTENT_SCALE) - 2 * BORDER_PX
 
-    n = len(images)
-    base = audio_duration / n
-    per_slide = max(base + EPSILON, TRANSITION + 0.2)
-    durations = [per_slide] * n
+    with tempfile.TemporaryDirectory(prefix="video-images-") as tmpdir:
+        images = downscale_images(images, inner_w, inner_h, tmpdir)
 
-    # =========================
-    # Slaydlarni yig'ish
-    # =========================
-    slides = []
-    for img_path, d in zip(images, durations):
-        framed = framed_image_clip(img_path, duration=d)
-        bg = make_background(duration=d)
+        audio = AudioFileClip(audio_path)
+        audio_duration = float(audio.duration)
 
-        slide = CompositeVideoClip(
-            [bg, framed.with_position(("center", "center"))],
-            size=(TARGET_W, TARGET_H)
-        ).with_duration(d)
+        n = len(images)
+        base = audio_duration / n
+        per_slide = max(base + EPSILON, TRANSITION + 0.2)
+        durations = [per_slide] * n
 
-        slides.append(slide)
+        # =========================
+        # Slaydlarni yig'ish
+        # =========================
+        slides = []
+        for img_path, d in zip(images, durations):
+            framed = framed_image_clip(img_path, duration=d)
+            bg = make_background(duration=d)
 
-    slideshow = concatenate_videoclips(slides, method="compose", padding=-TRANSITION)
+            slide = CompositeVideoClip(
+                [bg, framed.with_position(("center", "center"))],
+                size=(TARGET_W, TARGET_H)
+            ).with_duration(d)
 
-    # =========================
-    # Audio bilan birlashtirish
-    # =========================
-    if MODE == "trim_to_audio":
-        final = slideshow.with_audio(audio).with_duration(audio_duration)
-    elif MODE == "pad_audio":
-        total = sum(durations)
-        if total > audio_duration:
-            sil = total - audio_duration
-            silence = AudioClip(lambda t: [0], duration=sil, fps=44100)
-            full_audio = concatenate_audioclips([audio, silence])
-            final = slideshow.with_audio(full_audio).with_duration(total)
-        else:
+            slides.append(slide)
+
+        slideshow = concatenate_videoclips(slides, method="compose", padding=-TRANSITION)
+
+        # =========================
+        # Audio bilan birlashtirish
+        # =========================
+        if MODE == "trim_to_audio":
             final = slideshow.with_audio(audio).with_duration(audio_duration)
-    else:
-        raise ValueError("MODE noto'g'ri. 'trim_to_audio' yoki 'pad_audio' bo'lishi kerak.")
+        elif MODE == "pad_audio":
+            total = sum(durations)
+            if total > audio_duration:
+                sil = total - audio_duration
+                silence = AudioClip(lambda t: [0], duration=sil, fps=44100)
+                full_audio = concatenate_audioclips([audio, silence])
+                final = slideshow.with_audio(full_audio).with_duration(total)
+            else:
+                final = slideshow.with_audio(audio).with_duration(audio_duration)
+        else:
+            raise ValueError("MODE noto'g'ri. 'trim_to_audio' yoki 'pad_audio' bo'lishi kerak.")
 
-    # =========================
-    # Subtitrlarni qo'shish
-    # =========================
-    if captions_path and os.path.exists(captions_path):
-        subs = SubtitlesClip(
-            captions_path,
-            make_textclip=make_subtitle_txt,
-            encoding="utf-8-sig"
+        # =========================
+        # Subtitrlarni qo'shish
+        # =========================
+        if captions_path and os.path.exists(captions_path):
+            subs = SubtitlesClip(
+                captions_path,
+                make_textclip=make_subtitle_txt,
+                encoding="utf-8-sig"
+            )
+
+            probe = make_subtitle_txt("gypqj\n ")
+            panel_h = probe.h
+            try:
+                probe.close()
+            except Exception:
+                pass
+
+            subs = subs.with_position(("center", TARGET_H - SUB_BOTTOM_MARGIN - panel_h))
+            final = CompositeVideoClip([final, subs], size=(TARGET_W, TARGET_H)).with_duration(final.duration)
+
+        # =========================
+        # Saqlash
+        # =========================
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        final.write_videofile(
+            output_path,
+            fps=FPS,
+            preset="fast",
+            threads=4
         )
-
-        probe = make_subtitle_txt("gypqj\n ")
-        panel_h = probe.h
-        try:
-            probe.close()
-        except Exception:
-            pass
-
-        subs = subs.with_position(("center", TARGET_H - SUB_BOTTOM_MARGIN - panel_h))
-        final = CompositeVideoClip([final, subs], size=(TARGET_W, TARGET_H)).with_duration(final.duration)
-
-    # =========================
-    # Saqlash
-    # =========================
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    final.write_videofile(
-        output_path,
-        fps=FPS,
-        preset="fast",
-        threads=4
-    )
