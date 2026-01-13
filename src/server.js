@@ -13,6 +13,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SCRIPTS_DIR = path.resolve(__dirname, "..", "scripts");
 const STORAGE_DIR = path.join(BASE_DIR, "storage");
+const BACKEND_STORAGE_DIR = process.env.BACKEND_STORAGE_DIR || STORAGE_DIR;
+const AUDIO_SRC_DIR = path.join(BACKEND_STORAGE_DIR, "audio");
+const AUDIO_CAPTION_SRC_DIR = path.join(BACKEND_STORAGE_DIR, "audioCaption");
+const PRODUCT_API_BASE = process.env.PRODUCT_API_BASE || "https://api.uy-joy.uz";
 const VIDEOS_DIR = path.join(STORAGE_DIR, "videos");
 const ASSETS_DIR = path.join(BASE_DIR, "assets");
 
@@ -40,13 +44,28 @@ function jobPaths(productId) {
   const statusPath = path.join(jobDir, "status.json");
   const errorPath = path.join(jobDir, "error.txt");
 
-  const audioPath = path.join(inputDir, "audio.wav");
+  const audioMp3Path = path.join(inputDir, "audio.mp3");
+  const audioWavPath = path.join(inputDir, "audio.wav");
   const captionsPath = path.join(inputDir, "captions.srt");
   const outVideo = path.join(outputDir, "video.mp4");
 
   const outRel = `videos/${id}/output/video.mp4`;
 
-  return { id, jobDir, inputDir, imagesDir, outputDir, lockPath, statusPath, errorPath, audioPath, captionsPath, outVideo, outRel };
+  return {
+    id,
+    jobDir,
+    inputDir,
+    imagesDir,
+    outputDir,
+    lockPath,
+    statusPath,
+    errorPath,
+    audioMp3Path,
+    audioWavPath,
+    captionsPath,
+    outVideo,
+    outRel
+  };
 }
 
 function writeStatus(p, statusObj) {
@@ -92,6 +111,7 @@ function getStatus(productId) {
 
 function startRender(productId) {
   const p = jobPaths(productId);
+  const audioPath = fs.existsSync(p.audioMp3Path) ? p.audioMp3Path : p.audioWavPath;
 
   // video allaqachon tayyor
   if (fs.existsSync(p.outVideo)) return { started: false, status: "done" };
@@ -113,7 +133,7 @@ function startRender(productId) {
   const args = [
     path.join(SCRIPTS_DIR, "render_video.py"),
     "--images-dir", p.imagesDir,
-    "--audio-path", p.audioPath,
+    "--audio-path", audioPath,
     "--output-path", p.outVideo,
     "--assets-dir", ASSETS_DIR
   ];
@@ -148,6 +168,99 @@ function startRender(productId) {
   return { started: true, status: "running" };
 }
 
+function extractImageUrls(payload) {
+  if (!payload || typeof payload !== "object") return [];
+  const root = payload?.data || payload?.result || payload;
+  const candidates = [
+    root?.photos,
+    root?.images,
+    root?.productOrder?.photos,
+    root?.product?.photos,
+    root?.productOrder?.product?.photos
+  ];
+  const singles = [
+    root?.photo,
+    root?.productOrder?.photo,
+    root?.product?.photo
+  ];
+
+  const out = [];
+  const seen = new Set();
+  const addUrl = (value) => {
+    const v = String(value || "").trim();
+    if (!v) return;
+    const abs = normalizeImageUrl(v);
+    if (!abs) return;
+    if (seen.has(abs)) return;
+    seen.add(abs);
+    out.push(abs);
+  };
+
+  const normalizeEntry = (entry) => {
+    if (!entry) return "";
+    if (typeof entry === "string") return entry;
+    return entry?.url || entry?.imageUrl || entry?.src || entry?.path || entry?.fileUrl || "";
+  };
+
+  candidates.forEach((list) => {
+    if (!Array.isArray(list)) return;
+    list.forEach((entry) => addUrl(normalizeEntry(entry)));
+  });
+  singles.forEach((entry) => addUrl(normalizeEntry(entry)));
+
+  return out;
+}
+
+function normalizeImageUrl(value) {
+  const v = String(value || "").trim();
+  if (!v) return "";
+  if (/^https?:\/\//i.test(v)) return v;
+  if (v.startsWith("//")) return `https:${v}`;
+  if (v.startsWith("/")) {
+    try {
+      const base = new URL(PRODUCT_API_BASE);
+      return `${base.origin}${v}`;
+    } catch {
+      return `${PRODUCT_API_BASE.replace(/\/$/, "")}${v}`;
+    }
+  }
+  return v;
+}
+
+async function fetchProduct(productId) {
+  const url = `${PRODUCT_API_BASE.replace(/\/$/, "")}/api/public/product/${productId}`;
+  const resp = await fetch(url, { method: "GET" });
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => "");
+    throw new Error(t || `Product API xatosi: ${resp.status}`);
+  }
+  return resp.json();
+}
+
+async function downloadImageToDir(url, dir, index) {
+  const resp = await fetch(url, { method: "GET" });
+  if (!resp.ok) {
+    throw new Error(`Rasmni yuklab bo'lmadi: ${resp.status}`);
+  }
+  const buf = Buffer.from(await resp.arrayBuffer());
+  let ext = "";
+  try {
+    const u = new URL(url);
+    ext = path.extname(u.pathname || "");
+  } catch {}
+  if (!ext || ext.length > 5) {
+    const ct = String(resp.headers.get("content-type") || "").toLowerCase();
+    if (ct.includes("png")) ext = ".png";
+    else if (ct.includes("webp")) ext = ".webp";
+    else if (ct.includes("jpeg") || ct.includes("jpg")) ext = ".jpg";
+    else ext = ".jpg";
+  }
+  const name = String(index + 1).padStart(3, "0") + ext;
+  const dest = path.join(dir, name);
+  fs.writeFileSync(dest, buf);
+  return dest;
+}
+
 app.get("/health", (_, res) => res.json({ ok: true }));
 
 // STATUS
@@ -165,7 +278,7 @@ app.post(
     { name: "captions", maxCount: 1 },
     { name: "images", maxCount: 100 }
   ]),
-  (req, res) => {
+  async (req, res) => {
     const productId = String(req.body.productId || "").trim();
     if (!productId) return res.status(400).json({ ok: false, error: "productId required" });
 
@@ -178,35 +291,58 @@ app.post(
     if (st0.status === "done") return res.json({ ok: true, ...st0 });
     if (st0.status === "running") return res.json({ ok: true, ...st0 });
 
-    // audio majburiy (siz xohlasangiz optional qilamiz)
     const audio = req.files?.audio?.[0];
-    if (!audio) return res.status(400).json({ ok: false, error: "audio required" });
-    fs.writeFileSync(p.audioPath, audio.buffer);
-
-    // captions ixtiyoriy
     const captions = req.files?.captions?.[0];
+    const images = req.files?.images || [];
+    const hasUploads = Boolean(audio || captions || images.length);
+
+    if (audio) {
+      fs.writeFileSync(p.audioMp3Path, audio.buffer);
+    } else {
+      const srcAudio = path.join(AUDIO_SRC_DIR, `${productId}_audio.mp3`);
+      if (!fs.existsSync(srcAudio)) {
+        return res.status(404).json({ ok: false, error: "Audio topilmadi" });
+      }
+      fs.copyFileSync(srcAudio, p.audioMp3Path);
+    }
+
     if (captions) {
       fs.writeFileSync(p.captionsPath, captions.buffer);
     } else {
-      try { fs.unlinkSync(p.captionsPath); } catch {}
+      const srcCaption = path.join(AUDIO_CAPTION_SRC_DIR, `${productId}_audioCaption.srt`);
+      if (fs.existsSync(srcCaption)) {
+        fs.copyFileSync(srcCaption, p.captionsPath);
+      } else {
+        try { fs.unlinkSync(p.captionsPath); } catch {}
+      }
     }
-
-    // images majburiy
-    const images = req.files?.images || [];
-    if (!images.length) return res.status(400).json({ ok: false, error: "images[] required" });
 
     // eski rasmlarni tozalash
     for (const f of fs.readdirSync(p.imagesDir)) {
       fs.unlinkSync(path.join(p.imagesDir, f));
     }
 
-    // ketma-ket saqlaymiz: 001.jpg, 002.jpg ...
-    const sorted = images.slice().sort((a, b) => a.originalname.localeCompare(b.originalname));
-    sorted.forEach((img, idx) => {
-      const ext = path.extname(img.originalname) || ".jpg";
-      const name = String(idx + 1).padStart(3, "0") + ext.toLowerCase();
-      fs.writeFileSync(path.join(p.imagesDir, name), img.buffer);
-    });
+    if (images.length) {
+      const sorted = images.slice().sort((a, b) => a.originalname.localeCompare(b.originalname));
+      sorted.forEach((img, idx) => {
+        const ext = path.extname(img.originalname) || ".jpg";
+        const name = String(idx + 1).padStart(3, "0") + ext.toLowerCase();
+        fs.writeFileSync(path.join(p.imagesDir, name), img.buffer);
+      });
+    } else if (!hasUploads || !images.length) {
+      try {
+        const product = await fetchProduct(productId);
+        const urls = extractImageUrls(product);
+        if (!urls.length) {
+          return res.status(404).json({ ok: false, error: "Rasmlar topilmadi" });
+        }
+        for (let i = 0; i < urls.length; i += 1) {
+          await downloadImageToDir(urls[i], p.imagesDir, i);
+        }
+      } catch (err) {
+        return res.status(502).json({ ok: false, error: err?.message || "Rasmlarni olishda xatolik" });
+      }
+    }
 
     // Render boshlaymiz
     const r = startRender(productId);
