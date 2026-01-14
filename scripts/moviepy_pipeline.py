@@ -54,7 +54,7 @@ def render_video(
 
     def downscale_images(image_paths, max_w, max_h, tmpdir):
         try:
-            from PIL import Image
+            from PIL import Image, ImageOps
         except Exception:
             return image_paths
 
@@ -65,11 +65,8 @@ def render_video(
         for idx, src in enumerate(image_paths):
             try:
                 with Image.open(src) as im:
-                    original_size = im.size
+                    im = ImageOps.exif_transpose(im)
                     im.thumbnail((max_w, max_h), Image.LANCZOS)
-                    if im.size == original_size:
-                        resized.append(src)
-                        continue
                     im = im.convert("RGB")
                     dst = os.path.join(tmpdir, f"{idx:03d}.jpg")
                     im.save(dst, format="JPEG", quality=85, optimize=True)
