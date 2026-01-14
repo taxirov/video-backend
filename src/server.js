@@ -144,7 +144,14 @@ function startRender(productId) {
     args.push("--captions-path", p.captionsPath);
   }
 
-  const py = spawn("python3", args, { stdio: ["ignore", "ignore", "pipe"] });
+  const py = spawn("python3", args, {
+    stdio: ["ignore", "ignore", "pipe"],
+    env: {
+      ...process.env,
+      MAX_IMAGES: process.env.MAX_IMAGES || "5",
+      SKIP_CAPTIONS: process.env.SKIP_CAPTIONS || "1"
+    }
+  });
 
   let stderr = "";
   let settled = false;
