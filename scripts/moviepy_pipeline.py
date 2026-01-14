@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import math
 import os
 import tempfile
 from glob import glob
@@ -178,6 +179,9 @@ def render_video(
             audio_duration = 0.0
 
         n = len(images)
+        if not math.isfinite(audio_duration):
+            audio_duration = 0.0
+
         if audio_duration > 0.01:
             base = audio_duration / n
             per_slide = max(base + EPSILON, TRANSITION + 0.2)
@@ -265,6 +269,9 @@ def render_video(
         final.write_videofile(
             output_path,
             fps=FPS,
+            codec="libx264",
+            audio_codec="aac",
+            audio=bool(audio),
             preset="fast",
-            threads=4
+            threads=2
         )
