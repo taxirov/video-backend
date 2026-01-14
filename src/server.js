@@ -20,6 +20,7 @@ const PRODUCT_API_BASE = process.env.PRODUCT_API_BASE || "https://api.uy-joy.uz"
 const VIDEOS_DIR = path.join(STORAGE_DIR, "videos");
 const ASSETS_DIR = path.join(BASE_DIR, "assets");
 const MAX_IMAGES = Number(process.env.MAX_IMAGES || 10);
+const MIN_VIDEO_BYTES = Number(process.env.MIN_VIDEO_BYTES || 200 * 1024);
 
 // Sizning domeningiz (Nginx /files/ -> storage/ qilib bergan bo‘lsa):
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || "https://avto-video2.webpack.uz";
@@ -77,6 +78,15 @@ function readStatus(p) {
   try { return JSON.parse(fs.readFileSync(p.statusPath, "utf-8")); } catch { return null; }
 }
 
+function isValidVideo(videoPath) {
+  try {
+    const st = fs.statSync(videoPath);
+    return st.isFile() && st.size >= MIN_VIDEO_BYTES;
+  } catch {
+    return false;
+  }
+}
+
 // Atomik lock: agar mavjud bo‘lsa, ikkinchi render boshlanmaydi
 function tryAcquireLock(lockPath) {
   try {
@@ -95,8 +105,11 @@ function releaseLock(lockPath) {
 function getStatus(productId) {
   const p = jobPaths(productId);
 
-  if (fs.existsSync(p.outVideo)) {
+  if (isValidVideo(p.outVideo)) {
     return { status: "done", productId: p.id, fileUrl: publicFileUrl(p.outRel) };
+  }
+  if (fs.existsSync(p.outVideo) && !isValidVideo(p.outVideo)) {
+    try { fs.unlinkSync(p.outVideo); } catch {}
   }
   if (fs.existsSync(p.errorPath)) {
     const err = fs.readFileSync(p.errorPath, "utf-8").slice(0, 8000);
@@ -115,7 +128,10 @@ function startRender(productId) {
   const audioPath = fs.existsSync(p.audioMp3Path) ? p.audioMp3Path : p.audioWavPath;
 
   // video allaqachon tayyor
-  if (fs.existsSync(p.outVideo)) return { started: false, status: "done" };
+  if (isValidVideo(p.outVideo)) return { started: false, status: "done" };
+  if (fs.existsSync(p.outVideo) && !isValidVideo(p.outVideo)) {
+    try { fs.unlinkSync(p.outVideo); } catch {}
+  }
   // render ketmoqda
   if (fs.existsSync(p.lockPath)) return { started: false, status: "running" };
 
@@ -181,7 +197,7 @@ function startRender(productId) {
   });
 
   py.on("close", (code, signal) => {
-    if (code === 0 && fs.existsSync(p.outVideo)) {
+    if (code === 0 && isValidVideo(p.outVideo)) {
       finishDone();
       return;
     }
@@ -189,6 +205,10 @@ function startRender(productId) {
     const parts = [];
     if (stderr) parts.push(stderr.trim());
     if (signal) parts.push(`Signal: ${signal}`);
+    if (code === 0 && fs.existsSync(p.outVideo) && !isValidVideo(p.outVideo)) {
+      parts.push("Render produced a tiny video file");
+      try { fs.unlinkSync(p.outVideo); } catch {}
+    }
     if (!parts.length) parts.push(`Render failed with exit code ${code}`);
     finishFailed(parts.join("\n"));
   });

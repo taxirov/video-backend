@@ -168,12 +168,21 @@ def render_video(
     with tempfile.TemporaryDirectory(prefix="video-images-") as tmpdir:
         images = downscale_images(images, inner_w, inner_h, tmpdir)
 
-        audio = AudioFileClip(audio_path)
-        audio_duration = float(audio.duration)
+        audio = None
+        audio_duration = 0.0
+        try:
+            audio = AudioFileClip(audio_path)
+            audio_duration = float(audio.duration or 0.0)
+        except Exception:
+            audio = None
+            audio_duration = 0.0
 
         n = len(images)
-        base = audio_duration / n
-        per_slide = max(base + EPSILON, TRANSITION + 0.2)
+        if audio_duration > 0.01:
+            base = audio_duration / n
+            per_slide = max(base + EPSILON, TRANSITION + 0.2)
+        else:
+            per_slide = max(2.5, TRANSITION + 0.2)
         durations = [per_slide] * n
         total_duration = sum(durations)
 
@@ -181,6 +190,12 @@ def render_video(
             # Fallback to slideshow duration when audio metadata is empty.
             audio_duration = total_duration
             MODE = "pad_audio"
+            if audio:
+                try:
+                    audio.close()
+                except Exception:
+                    pass
+                audio = None
 
         # =========================
         # Slaydlarni yig'ish
@@ -202,19 +217,22 @@ def render_video(
         # =========================
         # Audio bilan birlashtirish
         # =========================
-        if MODE == "trim_to_audio":
-            final = slideshow.with_audio(audio).with_duration(audio_duration)
-        elif MODE == "pad_audio":
-            total = total_duration
-            if total > audio_duration:
-                sil = total - audio_duration
-                silence = AudioClip(lambda t: [0], duration=sil, fps=44100)
-                full_audio = concatenate_audioclips([audio, silence])
-                final = slideshow.with_audio(full_audio).with_duration(total)
-            else:
+        if audio:
+            if MODE == "trim_to_audio":
                 final = slideshow.with_audio(audio).with_duration(audio_duration)
+            elif MODE == "pad_audio":
+                total = total_duration
+                if total > audio_duration:
+                    sil = total - audio_duration
+                    silence = AudioClip(lambda t: [0], duration=sil, fps=44100)
+                    full_audio = concatenate_audioclips([audio, silence])
+                    final = slideshow.with_audio(full_audio).with_duration(total)
+                else:
+                    final = slideshow.with_audio(audio).with_duration(audio_duration)
+            else:
+                raise ValueError("MODE noto'g'ri. 'trim_to_audio' yoki 'pad_audio' bo'lishi kerak.")
         else:
-            raise ValueError("MODE noto'g'ri. 'trim_to_audio' yoki 'pad_audio' bo'lishi kerak.")
+            final = slideshow.with_duration(total_duration)
 
         # =========================
         # Subtitrlarni qo'shish
