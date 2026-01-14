@@ -21,7 +21,7 @@ const VIDEOS_DIR = path.join(STORAGE_DIR, "videos");
 const ASSETS_DIR = path.join(BASE_DIR, "assets");
 
 // Sizning domeningiz (Nginx /files/ -> storage/ qilib bergan bo‘lsa):
-const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || "https://video-backend.webpack.uz";
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || "https://avto-video2.webpack.uz";
 const publicFileUrl = (rel) => `${PUBLIC_BASE_URL}/files/${rel.replace(/\\/g, "/")}`;
 
 // upload limit (xohlasangiz oshiring)
