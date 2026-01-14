@@ -19,6 +19,7 @@ const AUDIO_CAPTION_SRC_DIR = path.join(BACKEND_STORAGE_DIR, "audioCaption");
 const PRODUCT_API_BASE = process.env.PRODUCT_API_BASE || "https://api.uy-joy.uz";
 const VIDEOS_DIR = path.join(STORAGE_DIR, "videos");
 const ASSETS_DIR = path.join(BASE_DIR, "assets");
+const MAX_IMAGES = Number(process.env.MAX_IMAGES || 10);
 
 // Sizning domeningiz (Nginx /files/ -> storage/ qilib bergan bo‘lsa):
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || "https://avto-video2.webpack.uz";
@@ -204,6 +205,16 @@ function extractImageUrls(payload) {
     root?.product?.photo
   ];
 
+  const normalizeList = (value) => {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") {
+      if (Array.isArray(value.data)) return value.data;
+      if (Array.isArray(value.items)) return value.items;
+      if (Array.isArray(value.edges)) return value.edges.map((e) => e?.node).filter(Boolean);
+    }
+    return [];
+  };
+
   const out = [];
   const seen = new Set();
   const addUrl = (value) => {
@@ -223,8 +234,7 @@ function extractImageUrls(payload) {
   };
 
   candidates.forEach((list) => {
-    if (!Array.isArray(list)) return;
-    list.forEach((entry) => addUrl(normalizeEntry(entry)));
+    normalizeList(list).forEach((entry) => addUrl(normalizeEntry(entry)));
   });
   singles.forEach((entry) => addUrl(normalizeEntry(entry)));
 
@@ -296,7 +306,7 @@ app.post(
   upload.fields([
     { name: "audio", maxCount: 1 },
     { name: "captions", maxCount: 1 },
-    { name: "images", maxCount: 100 }
+    { name: "images", maxCount: MAX_IMAGES }
   ]),
   async (req, res) => {
     const productId = String(req.body.productId || "").trim();
@@ -344,7 +354,8 @@ app.post(
 
     if (images.length) {
       const sorted = images.slice().sort((a, b) => a.originalname.localeCompare(b.originalname));
-      sorted.forEach((img, idx) => {
+      const limited = sorted.slice(0, MAX_IMAGES);
+      limited.forEach((img, idx) => {
         const ext = path.extname(img.originalname) || ".jpg";
         const name = String(idx + 1).padStart(3, "0") + ext.toLowerCase();
         fs.writeFileSync(path.join(p.imagesDir, name), img.buffer);
@@ -356,7 +367,8 @@ app.post(
         if (!urls.length) {
           return res.status(404).json({ ok: false, error: "Rasmlar topilmadi" });
         }
-        for (let i = 0; i < urls.length; i += 1) {
+        const limit = Math.min(urls.length, MAX_IMAGES);
+        for (let i = 0; i < limit; i += 1) {
           await downloadImageToDir(urls[i], p.imagesDir, i);
         }
       } catch (err) {

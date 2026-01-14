@@ -148,7 +148,7 @@ def render_video(
             size=(box_w, box_h)
         )
 
-    MAX_IMAGES = 30
+    MAX_IMAGES = int(os.getenv("MAX_IMAGES", "10"))
 
     # =========================
     # Ma'lumotlarni tayyorlash
