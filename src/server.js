@@ -161,7 +161,7 @@ function startRender(productId) {
   }
 
   const py = spawn("python3", args, {
-    stdio: ["ignore", "ignore", "pipe"],
+    stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
       MAX_IMAGES: process.env.MAX_IMAGES || "5",
@@ -170,6 +170,7 @@ function startRender(productId) {
   });
 
   let stderr = "";
+  let stdout = "";
   let settled = false;
   const finishFailed = (msg) => {
     if (settled) return;
@@ -190,6 +191,7 @@ function startRender(productId) {
     releaseLock(p.lockPath);
   };
 
+  py.stdout.on("data", (d) => { stdout += d.toString(); });
   py.stderr.on("data", (d) => { stderr += d.toString(); });
 
   py.on("error", (err) => {
@@ -203,11 +205,15 @@ function startRender(productId) {
     }
 
     const parts = [];
+    if (stdout) parts.push(stdout.trim());
     if (stderr) parts.push(stderr.trim());
     if (signal) parts.push(`Signal: ${signal}`);
     if (code === 0 && fs.existsSync(p.outVideo) && !isValidVideo(p.outVideo)) {
       parts.push("Render produced a tiny video file");
       try { fs.unlinkSync(p.outVideo); } catch {}
+    }
+    if (code === 0 && !fs.existsSync(p.outVideo)) {
+      parts.push("Render completed with no output file");
     }
     if (!parts.length) parts.push(`Render failed with exit code ${code}`);
     finishFailed(parts.join("\n"));
