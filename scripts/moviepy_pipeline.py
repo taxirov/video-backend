@@ -178,6 +178,12 @@ def render_video(
         base = audio_duration / n
         per_slide = max(base + EPSILON, TRANSITION + 0.2)
         durations = [per_slide] * n
+        total_duration = sum(durations)
+
+        if audio_duration <= 0.01:
+            # Fallback to slideshow duration when audio metadata is empty.
+            audio_duration = total_duration
+            MODE = "pad_audio"
 
         # =========================
         # Slaydlarni yig'ish
@@ -202,7 +208,7 @@ def render_video(
         if MODE == "trim_to_audio":
             final = slideshow.with_audio(audio).with_duration(audio_duration)
         elif MODE == "pad_audio":
-            total = sum(durations)
+            total = total_duration
             if total > audio_duration:
                 sil = total - audio_duration
                 silence = AudioClip(lambda t: [0], duration=sil, fps=44100)
