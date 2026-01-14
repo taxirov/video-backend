@@ -197,7 +197,11 @@ function extractImageUrls(payload) {
     root?.images,
     root?.productOrder?.photos,
     root?.product?.photos,
-    root?.productOrder?.product?.photos
+    root?.productOrder?.product?.photos,
+    root?.productOrder?.insideBanners,
+    root?.productOrder?.outsideBanners,
+    root?.productOrder?.buildings,
+    root?.buildings
   ];
   const singles = [
     root?.photo,
@@ -233,9 +237,14 @@ function extractImageUrls(payload) {
     return entry?.url || entry?.imageUrl || entry?.src || entry?.path || entry?.fileUrl || "";
   };
 
-  candidates.forEach((list) => {
-    normalizeList(list).forEach((entry) => addUrl(normalizeEntry(entry)));
-  });
+  const addFromList = (list) => {
+    normalizeList(list).forEach((entry) => {
+      if (entry?.photos) addFromList(entry.photos);
+      addUrl(normalizeEntry(entry));
+    });
+  };
+
+  candidates.forEach((list) => addFromList(list));
   singles.forEach((entry) => addUrl(normalizeEntry(entry)));
 
   return out;
